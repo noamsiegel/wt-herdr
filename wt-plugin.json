@@ -1,0 +1,14 @@
+{
+  "api_version": "git-wt.plugin.v0",
+  "name": "herdr",
+  "executable": "wt-herdr",
+  "description": "Reference herdr terminal-tab plugin for git-wt",
+  "events": [
+    "wt:worktree-created",
+    "wt:worktree-removed",
+    "wt:focus",
+    "wt:list"
+  ],
+  "version": "0.1.0",
+  "source": "https://github.com/noamsiegel/wt-herdr"
+}

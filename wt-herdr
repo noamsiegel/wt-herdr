@@ -1,0 +1,220 @@
+#!/usr/bin/env bash
+# wt-herdr — reference plugin implementing the git-wt.plugin.v0 contract
+# for the herdr terminal-tab manager.
+#
+# Plugin contract (per git-wt v0.3.0+):
+#   wt-herdr manifest                    → prints wt-plugin.json
+#   wt-herdr health                      → {"ok":true|false, ...}
+#   wt-herdr event <event-name> < json   → handle one lifecycle event
+#
+# Events handled:
+#   wt:worktree-created  — create a herdr tab for the new worktree
+#   wt:worktree-removed  — close the herdr tab
+#   wt:focus             — foreground the existing tab
+#   wt:list              — return tab status for given worktrees
+
+set -euo pipefail
+IFS=$'\n\t'
+
+# ---------- output / utility ----------
+err()  { printf '%s\n' "$*" >&2; }
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# Resolve workspace name from the JSON payload (`.repo.name` falls back to repo dir basename).
+_workspace_name() {
+  local payload="$1"
+  echo "$payload" | yq -p json -r '.repo.name // (.worktree.path | split("/") | .[-2]) // ""' 2>/dev/null
+}
+
+_worktree_id() {
+  echo "$1" | yq -p json -r '.worktree.id // ""' 2>/dev/null
+}
+_worktree_path() {
+  echo "$1" | yq -p json -r '.worktree.path // ""' 2>/dev/null
+}
+
+# ---------- herdr ops ----------
+herdr_server_up() {
+  herdr status server 2>/dev/null | grep -q '^status: running'
+}
+
+herdr_ws_id() {
+  local label="$1"
+  herdr workspace list 2>/dev/null \
+    | yq -p json -r ".result.workspaces[] | select(.label == \"$label\") | .workspace_id" \
+    | head -1
+}
+
+herdr_ensure_ws() {
+  local label="$1" ws_id
+  ws_id=$(herdr_ws_id "$label")
+  if [[ -z "$ws_id" ]]; then
+    herdr workspace create --label "$label" --no-focus >/dev/null || return 1
+    ws_id=$(herdr_ws_id "$label")
+  fi
+  [[ -n "$ws_id" ]] || return 1
+  printf '%s' "$ws_id"
+}
+
+herdr_pane_for_cwd() {
+  local ws_id="$1" target="$2" rp_target
+  [[ -z "$ws_id" ]] && { echo ""; return 0; }
+  rp_target=$(realpath "$target" 2>/dev/null || echo "$target")
+  herdr pane list --workspace "$ws_id" 2>/dev/null \
+    | yq -p json -r ".result.panes[] | select(.cwd == \"$target\" or .cwd == \"$rp_target\") | .tab_id" \
+    | head -1
+}
+
+herdr_create_tab() {
+  local ws_id="$1" cwd="$2" label="$3"
+  herdr tab create --workspace "$ws_id" --cwd "$cwd" --label "$label" --focus >/dev/null
+}
+
+herdr_close_tab() {
+  local tab_id="$1"
+  herdr tab close "$tab_id" >/dev/null 2>&1 || return 1
+}
+
+herdr_tab_status() {
+  local ws_id="$1" tab_id="$2"
+  herdr tab list --workspace "$ws_id" 2>/dev/null \
+    | yq -p json -r ".result.tabs[] | select(.tab_id == \"$tab_id\") | .agent_status" \
+    | head -1
+}
+
+# ---------- event handlers ----------
+handle_worktree_created() {
+  local payload="$1"
+  local id path ws_name ws_id
+  id=$(_worktree_id "$payload")
+  path=$(_worktree_path "$payload")
+  ws_name=$(_workspace_name "$payload")
+  [[ -n "$id" && -n "$path" && -n "$ws_name" ]] || { err "wt-herdr: missing required fields in payload"; exit 2; }
+
+  ws_id=$(herdr_ensure_ws "$ws_name") || { err "wt-herdr: couldn't ensure workspace '$ws_name'"; exit 30; }
+  if herdr_create_tab "$ws_id" "$(realpath "$path" 2>/dev/null || echo "$path")" "$id"; then
+    printf '{"status":"ok","handle":"herdr-tab-for-%s"}\n' "$id"
+  else
+    printf '{"status":"error","reason":"create-tab-failed"}\n'
+    exit 30
+  fi
+}
+
+handle_worktree_removed() {
+  local payload="$1"
+  local path ws_name ws_id tab_id
+  path=$(_worktree_path "$payload")
+  ws_name=$(_workspace_name "$payload")
+  [[ -n "$path" && -n "$ws_name" ]] || { err "wt-herdr: missing required fields"; exit 2; }
+
+  ws_id=$(herdr_ws_id "$ws_name") || true
+  if [[ -z "$ws_id" ]]; then
+    printf '{"status":"noop","reason":"no-workspace"}\n'
+    return 0
+  fi
+  tab_id=$(herdr_pane_for_cwd "$ws_id" "$path") || true
+  if [[ -z "$tab_id" ]]; then
+    printf '{"status":"noop","reason":"no-tab"}\n'
+    return 0
+  fi
+  if herdr_close_tab "$tab_id"; then
+    printf '{"status":"ok"}\n'
+  else
+    printf '{"status":"error","reason":"close-tab-failed"}\n'
+    exit 30
+  fi
+}
+
+handle_focus() {
+  local payload="$1"
+  local path ws_name ws_id tab_id
+  path=$(_worktree_path "$payload")
+  ws_name=$(_workspace_name "$payload")
+  [[ -n "$path" && -n "$ws_name" ]] || { err "wt-herdr: missing fields"; exit 2; }
+
+  ws_id=$(herdr_ws_id "$ws_name") || true
+  [[ -z "$ws_id" ]] && { printf '{"status":"not-found"}\n'; exit 20; }
+  tab_id=$(herdr_pane_for_cwd "$ws_id" "$path") || true
+  [[ -z "$tab_id" ]] && { printf '{"status":"not-found"}\n'; exit 20; }
+  if herdr tab focus "$tab_id" >/dev/null; then
+    printf '{"status":"ok","handle":"%s"}\n' "$tab_id"
+  else
+    printf '{"status":"error"}\n'
+    exit 30
+  fi
+}
+
+# wt:list isn't required for v0.1.0; return empty result so core falls back to plain list.
+handle_list() {
+  printf '{"status":"ok","worktrees":[]}\n'
+}
+
+# ---------- top-level dispatch ----------
+cmd_manifest() {
+  local self_dir; self_dir=$(cd "$(dirname "$0")" && pwd)
+  cat "$self_dir/wt-plugin.json"
+}
+
+cmd_health() {
+  if ! have herdr; then
+    printf '{"ok":false,"reason":"herdr not installed"}\n'
+    exit 30
+  fi
+  if ! herdr_server_up; then
+    printf '{"ok":false,"reason":"herdr server not running"}\n'
+    exit 30
+  fi
+  if ! have yq; then
+    printf '{"ok":false,"reason":"yq not installed (required to parse herdr JSON)"}\n'
+    exit 30
+  fi
+  printf '{"ok":true,"herdr":"%s","yq":"%s"}\n' "$(command -v herdr)" "$(command -v yq)"
+}
+
+cmd_event() {
+  local event="${1:-}"
+  [[ -n "$event" ]] || { err "wt-herdr: usage: wt-herdr event <event-name>"; exit 2; }
+  have herdr || { err "wt-herdr: herdr not installed"; exit 30; }
+  have yq    || { err "wt-herdr: yq not installed"; exit 30; }
+  herdr_server_up || { err "wt-herdr: herdr server not running"; exit 30; }
+
+  local payload
+  payload=$(cat)
+
+  case "$event" in
+    wt:worktree-created) handle_worktree_created "$payload" ;;
+    wt:worktree-removed) handle_worktree_removed "$payload" ;;
+    wt:focus)            handle_focus            "$payload" ;;
+    wt:list)             handle_list             "$payload" ;;
+    *)                   printf '{"status":"ignored","event":"%s"}\n' "$event" ;;
+  esac
+}
+
+main() {
+  case "${1:-}" in
+    manifest) cmd_manifest ;;
+    health)   cmd_health ;;
+    event)    shift; cmd_event "$@" ;;
+    -h|--help|help|"")
+      cat <<EOF
+wt-herdr — reference herdr plugin for git-wt.
+
+usage:
+  wt-herdr manifest             print plugin manifest JSON
+  wt-herdr health               check herdr installation/server
+  wt-herdr event <name> < json  handle one lifecycle event
+
+Events: wt:worktree-created, wt:worktree-removed, wt:focus, wt:list.
+
+API: git-wt.plugin.v0
+Source: https://github.com/noamsiegel/wt-herdr
+EOF
+      ;;
+    *)
+      err "wt-herdr: unknown subcommand: $1"
+      exit 2
+      ;;
+  esac
+}
+
+main "$@"
