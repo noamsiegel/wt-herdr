@@ -81,7 +81,7 @@ EOF
   [ "$(printf '%s' "$output" | yq -p json -r '.name')" = "herdr" ]
   [ "$(printf '%s' "$output" | yq -p json -r '.executable')" = "wt-herdr" ]
   [ "$(printf '%s' "$output" | yq -p json -r '.api_versions[0]')" = "git-wt.plugin.v0" ]
-  [ "$(printf '%s' "$output" | yq -p json -r '.version')" = "0.1.1" ]
+  [ "$(printf '%s' "$output" | yq -p json -r '.version')" = "0.1.2" ]
 }
 
 @test "health reports JSON status and plugin version" {

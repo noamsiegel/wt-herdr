@@ -1,5 +1,10 @@
 # Changelog
 
+## [0.1.2] — RELEASING.md
+
+### Added
+- `RELEASING.md`: release checklist + recovery notes for plugin-only repos (no brew formula; tag + release; registry-entry path in git-wt).
+
 ## [0.1.1] — 2026-05-24
 
 ### Added
