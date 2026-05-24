@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.4] - 2026-05-24
+
+### Fixed
+- `health` now returns `ok:true` with availability fields (`herdr_available`, `server_running`) when herdr is unavailable, instead of `ok:false` exit 30. Health is read-only introspection — event handlers still fail loudly when herdr is required and missing. Required so `git-wt plugin validate .` works on CI runners (and any developer machine) without herdr installed. Matches the wt-cmux v0.1.3 fix of the same shape.
+
+### Changed
+- Bumped manifest version to 0.1.4.
+
 ## [0.1.3] — 2026-05-24
 
 ### Changed

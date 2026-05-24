@@ -172,21 +172,31 @@ cmd_manifest() {
 }
 
 cmd_health() {
-  local version
+  local version herdr_bin yq_bin herdr_available=false server_running=false
   version=$(plugin_version)
-  if ! have herdr; then
-    printf '{"ok":false,"version":"%s","reason":"herdr not installed"}\n' "$version"
+  herdr_bin=$(command -v herdr 2>/dev/null || true)
+  yq_bin=$(command -v yq 2>/dev/null || true)
+
+  if [[ -n "$herdr_bin" ]]; then
+    herdr_available=true
+    if herdr_server_up 2>/dev/null; then
+      server_running=true
+    fi
+  fi
+
+  # yq is a hard requirement: we need it to parse herdr JSON at event time.
+  if [[ -z "$yq_bin" ]]; then
+    printf '{"ok":false,"version":"%s","reason":"yq not installed","herdr":"%s","herdr_available":%s,"server_running":%s}\n' \
+      "$version" "$herdr_bin" "$herdr_available" "$server_running"
     exit 30
   fi
-  if ! herdr_server_up; then
-    printf '{"ok":false,"version":"%s","reason":"herdr server not running"}\n' "$version"
-    exit 30
-  fi
-  if ! have yq; then
-    printf '{"ok":false,"version":"%s","reason":"yq not installed (required to parse herdr JSON)"}\n' "$version"
-    exit 30
-  fi
-  printf '{"ok":true,"version":"%s","herdr":"%s","yq":"%s"}\n' "$version" "$(command -v herdr)" "$(command -v yq)"
+
+  # Health is read-only introspection: report runtime availability via
+  # fields but don't fail when herdr is unreachable. Event handlers still
+  # fail loudly if herdr is required and missing — that boundary is correct
+  # for event-time work, but health is just introspection.
+  printf '{"ok":true,"version":"%s","herdr":"%s","herdr_available":%s,"server_running":%s,"yq":"%s"}\n' \
+    "$version" "$herdr_bin" "$herdr_available" "$server_running" "$yq_bin"
 }
 
 cmd_event() {
