@@ -1,5 +1,5 @@
 {
-  "api_version": "git-wt.plugin.v0",
+  "api_versions": ["git-wt.plugin.v0"],
   "name": "herdr",
   "executable": "wt-herdr",
   "description": "Reference herdr terminal-tab plugin for git-wt",
@@ -9,6 +9,6 @@
     "wt:focus",
     "wt:list"
   ],
-  "version": "0.1.0",
+  "version": "0.1.1",
   "source": "https://github.com/noamsiegel/wt-herdr"
 }

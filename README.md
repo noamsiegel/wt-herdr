@@ -1,11 +1,8 @@
 # wt-herdr
 
-> Reference herdr plugin for [git-wt](https://github.com/noamsiegel/git-wt).
+Reference [git-wt](https://github.com/noamsiegel/git-wt) plugin for the [herdr](https://github.com/noamsiegel/herdr) terminal-tab manager.
 
-Implements the `git-wt.plugin.v0` contract for the
-[herdr](https://github.com/noamsiegel/herdr) terminal-tab manager. When
-git-wt creates, removes, focuses, or lists worktrees, this plugin creates,
-closes, or focuses the matching herdr tabs.
+`wt-herdr` does one thing: bridge git-wt worktree lifecycle events to herdr tabs. It implements `git-wt.plugin.v0`; the protocol source of truth is git-wt's [`docs/plugin-contract.md`](https://github.com/noamsiegel/git-wt/blob/main/docs/plugin-contract.md). Plugin-family comparison lives in git-wt's [`docs/plugins.md`](https://github.com/noamsiegel/git-wt/blob/main/docs/plugins.md).
 
 ## Install
 
@@ -14,60 +11,58 @@ brew install noamsiegel/tap/wt-herdr
 wt plugin install herdr
 ```
 
-Or for local development:
+Local development:
 
 ```bash
 git clone https://github.com/noamsiegel/wt-herdr.git
 wt plugin link ./wt-herdr
 ```
 
-## What it does
+## Behavior
 
-Subscribes to git-wt's four lifecycle events:
-
-| Event | Action |
+| git-wt event | herdr action |
 |---|---|
-| `wt:worktree-created` | `herdr workspace create` (if absent) + `herdr tab create --cwd <worktree>` |
-| `wt:worktree-removed` | `herdr tab close <tab_id>` (no-op if no tab) |
-| `wt:focus` | `herdr tab focus <tab_id>` |
-| `wt:list` | (no-op in v0.1.0; returns empty result) |
+| `wt:worktree-created` | Create workspace if absent, then create focused tab with worktree cwd. |
+| `wt:worktree-removed` | Close matching herdr tab; missing workspace/tab is a no-op. |
+| `wt:focus` | Focus matching herdr tab; missing tab returns `not-found`. |
+| `wt:list` | Return empty successful result until git-wt specifies query response semantics. |
 
 ## Requirements
 
-- `herdr` (the terminal-tab manager) installed and the server running
-- `yq` (mikefarah/yq, the Go binary) for parsing herdr's JSON output
-- `bash >= 4`
+- `git-wt` with `git-wt.plugin.v0` support.
+- `herdr` installed and server running.
+- `yq` (mikefarah/yq Go binary) for JSON parsing.
+- Bash 4 or newer.
 
-## Plugin contract
-
-Implements `git-wt.plugin.v0`. The CLI accepts three subcommands:
-
-```bash
-wt-herdr manifest             # prints wt-plugin.json
-wt-herdr health               # checks herdr install + server reachability
-wt-herdr event <name> < json  # handles one event
-```
-
-git-wt's core invokes `wt-herdr event <name>` with JSON on stdin. See the
-[git-wt plugin docs](https://github.com/noamsiegel/git-wt#plugins) for the
-full contract.
-
-## Health check
+## Commands
 
 ```bash
+wt-herdr manifest
 wt-herdr health
-# {"ok":true,"herdr":"...","yq":"..."}
+wt-herdr event wt:worktree-created < payload.json
 ```
 
-Returns non-zero exit when herdr isn't installed, the server isn't running,
-or yq is missing.
+`wt-herdr health` returns JSON and exits non-zero when `herdr`, herdr server, or `yq` is unavailable.
 
-## History
+## Environment
 
-This plugin is the **reference implementation** that came out of extracting
-herdr-specific code from git-wt core in v0.4.0. Other terminal-tab plugins
-(`wt-tmux`, `wt-kitty`, `wt-wezterm`, etc.) can be written against the same
-contract.
+No plugin-specific environment variables today. Configure herdr itself through herdr's own server/settings surface.
+
+## What it doesn't do
+
+- Does not define the git-wt plugin API; git-wt owns `git-wt.plugin.v0`.
+- Does not install, update, or configure herdr.
+- Does not manage git worktree naming, branch policy, or cleanup policy.
+- Does not make `wt:list` authoritative; it returns an empty result until the host query contract exists.
+- Does not fail worktree removal just because the matching tab was already closed.
+
+## Development
+
+```bash
+bash -n wt-herdr
+```
+
+Add bats tests under `tests/` when changing event behavior.
 
 ## License
 

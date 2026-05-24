@@ -20,6 +20,22 @@ IFS=$'\n\t'
 err()  { printf '%s\n' "$*" >&2; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+plugin_version() {
+  local self_dir line version=""
+  self_dir=$(cd "$(dirname "$0")" && pwd)
+  while IFS= read -r line; do
+    case "$line" in
+      *'"version"'*)
+        version=${line#*:}
+        version=${version//[\", ]/}
+        version=${version%,}
+        break
+        ;;
+    esac
+  done < "$self_dir/wt-plugin.json"
+  printf '%s' "$version"
+}
+
 # Resolve workspace name from the JSON payload (`.repo.name` falls back to repo dir basename).
 _workspace_name() {
   local payload="$1"
@@ -133,9 +149,9 @@ handle_focus() {
   [[ -n "$path" && -n "$ws_name" ]] || { err "wt-herdr: missing fields"; exit 2; }
 
   ws_id=$(herdr_ws_id "$ws_name") || true
-  [[ -z "$ws_id" ]] && { printf '{"status":"not-found"}\n'; exit 20; }
+  [[ -z "$ws_id" ]] && { printf '{"status":"noop","reason":"no-workspace"}\n'; return 0; }
   tab_id=$(herdr_pane_for_cwd "$ws_id" "$path") || true
-  [[ -z "$tab_id" ]] && { printf '{"status":"not-found"}\n'; exit 20; }
+  [[ -z "$tab_id" ]] && { printf '{"status":"noop","reason":"no-tab"}\n'; return 0; }
   if herdr tab focus "$tab_id" >/dev/null; then
     printf '{"status":"ok","handle":"%s"}\n' "$tab_id"
   else
@@ -156,19 +172,21 @@ cmd_manifest() {
 }
 
 cmd_health() {
+  local version
+  version=$(plugin_version)
   if ! have herdr; then
-    printf '{"ok":false,"reason":"herdr not installed"}\n'
+    printf '{"ok":false,"version":"%s","reason":"herdr not installed"}\n' "$version"
     exit 30
   fi
   if ! herdr_server_up; then
-    printf '{"ok":false,"reason":"herdr server not running"}\n'
+    printf '{"ok":false,"version":"%s","reason":"herdr server not running"}\n' "$version"
     exit 30
   fi
   if ! have yq; then
-    printf '{"ok":false,"reason":"yq not installed (required to parse herdr JSON)"}\n'
+    printf '{"ok":false,"version":"%s","reason":"yq not installed (required to parse herdr JSON)"}\n' "$version"
     exit 30
   fi
-  printf '{"ok":true,"herdr":"%s","yq":"%s"}\n' "$(command -v herdr)" "$(command -v yq)"
+  printf '{"ok":true,"version":"%s","herdr":"%s","yq":"%s"}\n' "$version" "$(command -v herdr)" "$(command -v yq)"
 }
 
 cmd_event() {
