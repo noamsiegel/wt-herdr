@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.3] — 2026-05-24
+
+### Changed
+- Manifest version assertion now reads the expected version from `wt-plugin.json` instead of a hardcoded literal.
+- Future version bumps no longer require touching `tests/test_plugin.bats`.
+
 ## [0.1.2] — RELEASING.md
 
 ### Added

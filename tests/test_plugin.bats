@@ -76,12 +76,14 @@ EOF
 }
 
 @test "manifest prints valid plugin manifest" {
+  local expected
+  expected="$(yq -p json -r '.version' "$REPO_ROOT/wt-plugin.json")"
   run "$REPO_ROOT/wt-herdr" manifest
   [ "$status" -eq 0 ]
   [ "$(printf '%s' "$output" | yq -p json -r '.name')" = "herdr" ]
   [ "$(printf '%s' "$output" | yq -p json -r '.executable')" = "wt-herdr" ]
   [ "$(printf '%s' "$output" | yq -p json -r '.api_versions[0]')" = "git-wt.plugin.v0" ]
-  [ "$(printf '%s' "$output" | yq -p json -r '.version')" = "0.1.2" ]
+  [ "$(printf '%s' "$output" | yq -p json -r '.version')" = "$expected" ]
 }
 
 @test "health reports JSON status and plugin version" {
